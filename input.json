@@ -1,0 +1,37 @@
+{
+    "eos" :
+    {
+        "model" : "ideal gas",
+        "rbar" : 8.314463,
+        "molemass" : 0.0289645,
+        "gamma" : 1.4,
+        "rhoinf" : 1.2922,
+        "pinf" : 101320.917
+    },
+
+    "grid" :
+    {
+        "size" : [16384,16384],
+        "rect" : [[-150, 150],[-150, 150]],
+        "decompose": [4,4],
+        "distributive": true
+    },
+
+    "solver" :
+    {
+        "T start" : 0,
+        "T end" : 1.0,
+        "CFL": 0.2,
+        "Frame index": 0,
+        "Frame interval" : 0.01,
+        "Total iteration" : 0,
+
+        "Write output" : true,
+        "Verbose" : 4,
+        "GpuFlag" :true
+    },
+
+    "resume": false,
+    "temp_dir" : "D:/temp/",
+    "output_dir" : "F:/vtktest/"
+}
