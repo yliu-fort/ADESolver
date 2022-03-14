@@ -1,0 +1,32 @@
+{
+    "eos" :
+    {
+        "rho" : 1.0,
+        "mu" : 1e-6
+    },
+
+    "grid" :
+    {
+        "size" : [128,128,32],
+        "rect" : [[-4, 4],[-4, 4],[-1, 1]],
+        "decompose": [1,1,1],
+        "distributive": false
+    },
+
+    "solver" :
+    {
+        "T start" : 0,
+        "T end" : 100.0,
+        "CFL": 0.2,
+        "Frame index": 0,
+        "Frame interval" : 1.0,
+        "Total iteration" : 0,
+
+        "Write output" : true,
+        "Verbose" : 2,
+        "GpuFlag" :true,
+        "Resume": false
+    },
+    "temp_dir" : "D:/temp/",
+    "output_dir" : "D:/temp/"
+}

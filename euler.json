@@ -11,6 +11,14 @@
 
     "grid" :
     {
+        "size" : [128,128,128],
+        "rect" : [[-150, 150],[-150, 150],[-150, 150]],
+        "decompose": [1,1,1],
+        "distributive": false
+    },
+
+    "grid1" :
+    {
         "size" : [16384,16384],
         "rect" : [[-150, 150],[-150, 150]],
         "decompose": [4,4],
@@ -27,11 +35,10 @@
         "Total iteration" : 0,
 
         "Write output" : true,
-        "Verbose" : 4,
-        "GpuFlag" :true
+        "Verbose" : 2,
+        "GpuFlag" :true,
+        "Resume": false
     },
-
-    "resume": false,
     "temp_dir" : "D:/temp/",
-    "output_dir" : "F:/vtktest/"
+    "output_dir" : "D:/temp/"
 }

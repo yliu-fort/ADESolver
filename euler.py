@@ -1,19 +1,23 @@
 # This is a sample Python script.
+# eos include various basic functionals
 import numpy as np
 import pickle
 from pathlib import Path
 import json
 import itertools
-from tvtk.api import tvtk, write_data
+from utils import tecplot_WriteRectilinearMesh
 
 try:
     import cupy as cp
+    cupyReady = True
 except ImportError:
     cp = np
+    cupyReady = False
     pass
 
+from grid import *
 
-# eos include various basic functionals
+
 # implement ideal gas eos
 class EOS_Base:
     Rbar = 1  # universal gas constant J/K/mol
@@ -51,141 +55,6 @@ class EOS_Base:
         print("Ambient speed of sound: " + str(self.querySoundSpeed(self.rhoinf, self.pinf)))
 
 
-class UniformGrid:
-    size = (16, 16)
-    rect = ((-1, 1))
-    ds = []
-    nelem = 0
-    # nvars = 0
-    ndims = 0
-
-    coords = []  # coordinates
-    mesh = []  # grid
-
-    nblayer = 2
-    n_decomposition = (2, 2)  # (2,2,2) etc
-    domain = []
-    stencil_op_collection = []
-
-    output_dir = []
-    b_Distribute = False
-
-    def set_output_dir(self, indir):
-        with Path(indir) as output_dir:
-            assert not output_dir.is_file(), "Input directory is a file!"
-            assert not output_dir.is_reserved(), "Input directory is reserved!"
-            assert output_dir.is_dir(), "Input directory does not exist!"
-
-            self.output_dir = output_dir
-            self.b_Distribute = True
-
-            print("Grid::Current output directory is set to %s" % output_dir)
-
-    def set_params(self):
-        self.nelem = np.prod(np.asarray(self.size))
-        self.ndims = len(self.size)
-
-        self.gen_buffer()
-        self.decompose_domain()
-        self.create_stencil_op_collection()
-
-    def gen_buffer(self):
-        self.coords = []
-        self.ds = []
-        for i in range(len(self.size)):
-            self.coords = (*self.coords, np.linspace(self.rect[i][0], self.rect[i][1], self.size[i]))
-            self.ds = (*self.ds, self.coords[-1][1] - self.coords[-1][0])
-
-        if self.b_Distribute:
-            self.mesh = np.memmap(self.output_dir.joinpath('_mesh'), dtype=np.float64, mode='w+',
-                                  shape=(self.ndims, *self.size))
-            np.stack(np.meshgrid(*self.coords, indexing='ij', copy=False), out=self.mesh)
-            self.mesh.flush()
-            self.mesh = np.memmap(self.output_dir.joinpath('_mesh'), dtype=np.float64, mode='r',
-                                  shape=(self.ndims, *self.size))
-        else:
-            self.mesh = np.stack(np.meshgrid(*self.coords, indexing='ij'))
-
-    def refresh_buffer(self):
-        if self.b_Distribute:
-            self.mesh = []
-            self.mesh = np.memmap(self.output_dir.joinpath('_mesh'), dtype=np.float64, mode='r',
-                                  shape=(self.ndims, *self.size))
-
-    def decompose_domain(self):
-        def get_chunk(i, nchunks, ndim):
-            if i == (nchunks - 1):
-                return slice(i * (ndim - 2 * self.nblayer) // nchunks + self.nblayer,
-                             -self.nblayer)
-            if i == 0:
-                return slice(self.nblayer, (i + 1) * (ndim - 2 * self.nblayer) // nchunks + self.nblayer)
-            return slice(i * (ndim - 2 * self.nblayer) // nchunks + self.nblayer,
-                         (i + 1) * (ndim - 2 * self.nblayer) // nchunks + self.nblayer)
-
-        self.domain = []
-        for k in itertools.product(*tuple(map(range, self.n_decomposition))):
-            slc = list(map(get_chunk, k, self.n_decomposition, self.size))
-            self.domain.append(slc)
-
-    def get_stencil_shifted(self, slc=(), axis=-1, shift=0):
-        new_slc = slc.copy()
-        assert np.abs(shift) <= self.nblayer, "stencil shift > num of boundary layer is not permitted"
-        new_start, new_stop = slc[axis].start - shift, slc[axis].stop - shift
-        new_stop = new_stop if new_stop != 0 else None
-        new_slc[axis] = slice(new_start, new_stop)
-        return new_slc
-
-    def get_stencil_extended(self, slc=(), axis=-1, padding=(0, 0)):
-        new_slc = slc.copy()
-        assert np.abs(padding[0]) <= self.nblayer, "stencil padding left  > num of boundary layer is not permitted"
-        assert np.abs(padding[1]) <= self.nblayer, "stencil padding right > num of boundary layer is not permitted"
-        new_start, new_stop = slc[axis].start - padding[0], slc[axis].stop + padding[1]
-        new_stop = new_stop if new_stop != 0 else None
-        new_slc[axis] = slice(new_start, new_stop)
-        return new_slc
-
-    def get_stencil_operators2(self, q, k, ndims):
-        qc = [slice(None), *q]
-
-        qe = [*q].copy()
-        for i in range(ndims):
-            qe = self.get_stencil_extended(qe, axis=i, padding=(2, 2))  # n + 2
-        qe = [slice(None), *qe]
-
-        dq = [slice(None), *[slice(2, -2)] * self.ndims]
-        qce, qpe, qme = dq.copy(), dq.copy(), dq.copy()
-        qce[1 + k], qpe[1 + k], qme[1 + k] = slice(1, -1), slice(2, None), slice(-2)
-        # qce = (slice(None), *qe)  # n + 2
-        # qpe = (slice(None), *self.get_stencil_shifted(qe, axis=k, shift=-1))  # n + 2
-        # qme = (slice(None), *self.get_stencil_shifted(qe, axis=k, shift=1))  # n + 2
-
-        dqp, dqm = [slice(None)] * (1 + self.ndims), [slice(None)] * (1 + self.ndims)
-        dqp[k + 1], dqm[k + 1] = slice(1, None), slice(-1)  # n + 1
-
-        return tuple(qe), tuple(qc), tuple(qce), tuple(qpe), tuple(qme), tuple(dqp), tuple(dqm)
-
-    '''
-    def get_stencil_operators(self, q, k):
-        qc = (slice(None), *q)  # n + 2, add slice(None) -> multi-field operator
-
-        qe = self.get_stencil_extended(q, axis=k, padding=(1, 1))  # n + 2
-        qce = (slice(None), *qe)  # n + 2
-        qpe = (slice(None), *self.get_stencil_shifted(qe, axis=k, shift=-1))  # n + 2
-        qme = (slice(None), *self.get_stencil_shifted(qe, axis=k, shift=1))  # n + 2
-
-        dqp, dqm = [slice(None)] * (1 + self.ndims), [slice(None)] * (1 + self.ndims)
-        dqp[k + 1], dqm[k + 1] = slice(1, None), slice(-1)  # n + 1
-        dqp, dqm = tuple(dqp), tuple(dqm)
-        return qc, qce, qpe, qme, dqp, dqm
-    '''
-
-    def create_stencil_op_collection(self):
-        self.stencil_op_collection = [[[] for _ in range(self.ndims)] for _ in range(np.product(self.n_decomposition))]
-        for k in range(self.ndims):
-            for q in range(np.product(self.n_decomposition)):
-                self.stencil_op_collection[q][k] = self.get_stencil_operators2(self.domain[q], k, self.ndims)
-
-
 class EulerSolver:
     grid = UniformGrid()
     eos = EOS_Base()
@@ -219,7 +88,7 @@ class EulerSolver:
             self.b_Resume = input_meta["Resume"]
             self.b_dumpfile = input_meta["Write output"]
             self.verbose = input_meta["Verbose"]
-            self.b_Cupy = input_meta["GpuFlag"]
+            self.b_Cupy = input_meta["GpuFlag"] and cupyReady
             print("Solver::Load input meta")
 
     def set_grid(self, grid):
@@ -469,7 +338,6 @@ class EulerSolver:
         u[:] = rhou / rho
         p[:] = (rhoe - 0.5 * self.get_magsqr(rhou) / rho) * (self.eos.gamma - 1.0)
 
-
     def to_conserved_vars(self, U, W):
         if self.verbose > 3:
             print(" - Convert to conserved variable")
@@ -478,7 +346,6 @@ class EulerSolver:
         rho[:] = rho2
         rhou[:] = rho * u
         rhoe[:] = 0.5 * rho * self.get_magsqr(u) + p / (self.eos.gamma - 1.0)
-
 
     def compute_flux(self, W, axis=-1):
         F = np.zeros_like(W)
@@ -496,18 +363,18 @@ class EulerSolver:
         if not self.b_dumpfile:
             return False
         self.refresh_buffer()
+        rn = "result.%06d.tec" % (self.nti,)
+        rho, u, p = self.splitvars(self.W)
+        uvars = [("u_%d" % i, u[i].flatten(order='F')) for i in range(self.grid.ndims)]
+        vars = (("rho", rho.flatten(order='F')), *uvars, ("p", p.flatten(order='F')))
+        self.grid.dumpToTecplot(self.output_dir.joinpath(rn), vars)
+        '''
         rn = "result%06d.pkl" % (self.nti,)
-        # self.to_primitive_vars(self.U, self.W)
-        # rho, u, p = self.splitvars(self.W)
         with open(self.output_dir.joinpath(rn), 'wb') as handle:
             print("Dump solution -> " + "t=%4f r%06d" % (self.t, self.nti,))
             np.savez_compressed(handle, t=self.t, W=self.W)
+        '''
         return True
-
-    def dumpToVTK(self, n):
-        #self.to_primitive_vars(self.U, self.W)
-        #convertNPToVTKrectDecomposed(self, self.W, n)
-        pass
 
     def dump_meta(self):
         if not self.b_dumpfile:
@@ -533,7 +400,7 @@ def clear_output_dir(dir):
     return True
 
 
-def load_input(input_meta='input.json'):
+def load_input(input_meta='euler.json'):
     with open(input_meta, ) as handle:
         return json.load(handle)
 
@@ -541,7 +408,7 @@ def load_input(input_meta='input.json'):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Opening JSON file
-    meta = load_input('input.json')
+    meta = load_input('euler.json')
     # clear_output_dir(meta["output_dir"])
 
     eos_model = EOS_Base(input_json=meta["eos"])
@@ -554,6 +421,7 @@ if __name__ == '__main__':
     grid.set_output_dir(meta["output_dir"])
     grid.b_Distribute = meta["grid"]["distributive"]
     grid.set_params()
+    grid.create_stencil_op_collection()
 
     solver = EulerSolver(input_json=meta["solver"])
     solver.set_output_dir(meta["output_dir"])

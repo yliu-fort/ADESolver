@@ -1,4 +1,4 @@
-from main import load_input, UniformGrid
+from euler import load_input, UniformGrid
 import cupy as cp
 import numpy as np
 import pickle
@@ -124,5 +124,5 @@ def convertCUfileToNP(input_meta):
 
 
 if __name__ == '__main__':
-    convertCUfileToNP(load_input('input.json'))
-    #convertNPToVTKrect(load_input('input.json'))
+    convertCUfileToNP(load_input('euler.json'))
+    #convertNPToVTKrect(load_input('euler.json'))
