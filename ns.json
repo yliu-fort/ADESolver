@@ -2,13 +2,13 @@
     "eos" :
     {
         "rho" : 1.0,
-        "mu" : 1e-6
+        "mu" : 0.0
     },
 
     "grid" :
     {
-        "size" : [4096,4096],
-        "rect" : [[-4, 4],[-4, 4]],
+        "size" : [512,512],
+        "rect" : [[-16, 16],[-16, 16]],
         "decompose": [1,1],
         "distributive": false
     },
@@ -19,7 +19,7 @@
         "T end" : 100.0,
         "CFL": 0.2,
         "Frame index": 0,
-        "Frame interval" : 0.1,
+        "Frame interval" : 0.25,
         "Total iteration" : 0,
 
         "Write output" : true,
@@ -27,6 +27,6 @@
         "GpuFlag" :true,
         "Resume": false
     },
-    "temp_dir" : "D:/temp/",
-    "output_dir" : "D:/temp/"
+    "temp_dir" : "./",
+    "output_dir" : "./"
 }

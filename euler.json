@@ -39,6 +39,6 @@
         "GpuFlag" :true,
         "Resume": false
     },
-    "temp_dir" : "D:/temp/",
-    "output_dir" : "D:/temp/"
+    "temp_dir" : "./",
+    "output_dir" : "./"
 }

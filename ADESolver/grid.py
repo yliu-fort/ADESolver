@@ -1,9 +1,7 @@
 import numpy as np
 import pickle
 from pathlib import Path
-import json
 import itertools
-from utils import tecplot_WriteRectilinearMesh
 
 try:
     import cupy as cp
@@ -148,54 +146,6 @@ class UniformGrid:
             for q in range(np.product(self.n_decomposition)):
                 self.stencil_op_collection[q][p] = self.get_stencil_operators(self.domain[q], p, self.ndims)
 
-    def dumpgridToTecplot(self):
-        # Coordinates
-        X = self.coords[0]
-        Y = self.coords[1]
-        if self.ndims == 2:
-            Z = [0]
-        else:
-            Z = self.coords[2]
-
-        # Data
-        nodeid = []
-        id = 0
-        for k in range(len(Z)):
-            for j in range(len(Y)):
-                for i in range(len(X)):
-                    nodeid = nodeid + [id]
-                    id = id + 1
-
-        # Write the data to Tecplot format
-        if self.ndims == 2:
-            vars = (("nodeid", nodeid), ("point_0", self.mesh[0].flatten(order='F')),
-                    ("point_1", self.mesh[1].flatten(order='F')))
-            tecplot_WriteRectilinearMesh(self.output_dir.joinpath("grid.tec"), X, Y, [], vars)  # 2D
-        else:
-            vars = (("nodeid", nodeid), ("point_0", self.mesh[0].flatten(order='F')),
-                    ("point_1", self.mesh[1].flatten(order='F')), ("point_2", self.mesh[2].flatten(order='F')))
-            tecplot_WriteRectilinearMesh(self.output_dir.joinpath("grid.tec"), X, Y, Z, vars)  # 3D
-
-    def dumpToTecplot(self, filename, vars):
-        # Coordinates
-        if self.nblayer > 0:
-            slc = slice(self.nblayer, -self.nblayer)
-        else:
-            slc = slice(None)
-        X = self.coords[0][slc]
-        Y = self.coords[1][slc]
-        if self.ndims == 2:
-            Z = [0]
-        else:
-            Z = self.coords[2][slc]
-
-        # Write the data to Tecplot format
-        # todo: for mesh higher than 3d get a selected 2d/3d slice to dump
-        if self.ndims == 2:
-            tecplot_WriteRectilinearMesh(filename, X, Y, [], vars)  # 2D
-        else:
-            tecplot_WriteRectilinearMesh(filename, X, Y, Z, vars)  # 3D
-
     def get3dslice(self, ii, axes=(0, 1, 2)):
         # Get a 3D slice
         assert self.ndims > 2, "must be 3 dimensional or higher!"
@@ -228,12 +178,9 @@ class UniformGrid:
             return self.ds[:3], tuple([self.rect[i][0] for i in range(3)])
 
 
-def load_input(input_meta='ns.json'):
-    with open(input_meta, ) as handle:
-        return json.load(handle)
-
-
 if __name__ == '__main__':
+    from .utils import load_input
+
     # Opening JSON file
     meta = load_input('ns.json')
 
