@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 import itertools
 from utils import tecplot_WriteRectilinearMesh
-from tvtk.api import tvtk, write_data
+from pyevtk.hl import imageToVTK
 
 cupyReady = False
 try:
@@ -433,46 +433,20 @@ class IncompressibleSolver:
             return False
         self.refresh_buffer()
 
-        rn = "result.%06d.vtk" % (self.nti,)
+        rn = "result.%06d" % (self.nti,)
         for ii in self.grid.domain:
             slc = (slice(None), *ii)
             if self.b_Cupy:
                 u = self.splitvars(self.U[slc].get())
             else:
                 u = self.splitvars(self.U[slc])
-            r = self.grid.image_grid()
             if self.grid.ndims == 2:
                 u = np.append(u, np.zeros_like(u[0:1]), axis=0)
-            r.point_data.vectors = np.array([u[i].flatten(order='F') for i in range(3)]).T
-            r.point_data.vectors.name = 'u'
-            write_data(r, str(self.output_dir.joinpath(rn)), file_type="binary")
+                u = u.reshape([*u.shape, 1])
 
-    def dump_solutionRECT(self, n):
-        if not self.b_dumpfile:
-            return False
-        self.refresh_buffer()
-
-        rn = "result.%06d.vtk" % (self.nti,)
-        for ii in self.grid.domain:
-            slc = (slice(None), *ii)
-            if self.b_Cupy:
-                u = self.splitvars(self.U[slc].get())
-            else:
-                u = self.splitvars(self.U[slc])
-            r = self.grid.rectilinear_grid()
-            #r.debug = True
-            ## Data 0 # scalar data
-            #r.point_data.scalars = u[0].flatten(order='F')
-            #r.point_data.scalars.name = 'u'
-            ## Data 1 # additional scalar data
-            #r.point_data.add_array(u[1].flatten(order='F'))
-            #r.point_data.get_array(1).name = 'v'
-            ## Data 2 # Vector data
-            if self.grid.ndims == 2:
-                u = np.append(u, np.zeros_like(u[0:1]), axis=0)
-            r.point_data.vectors = np.array([u[i].flatten(order='F') for i in range(3)]).T
-            r.point_data.vectors.name = 'u'
-            write_data(r, str(self.output_dir.joinpath(rn)), file_type="binary")
+            spacing, origin = self.grid.image_grid()
+            uvars = tuple([u[i] for i in range(3)])
+            imageToVTK(str(self.output_dir.joinpath(rn)), origin=origin, spacing=spacing, cellData={"u": uvars})
 
     def dump_solutionTEC(self, n):
         if not self.b_dumpfile:

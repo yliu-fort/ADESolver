@@ -4,7 +4,6 @@ from pathlib import Path
 import json
 import itertools
 from utils import tecplot_WriteRectilinearMesh
-from tvtk.api import tvtk
 
 try:
     import cupy as cp
@@ -210,29 +209,6 @@ class UniformGrid:
 
         return (slice(None), *ii0)
 
-    def rectilinear_grid(self):
-        # Coordinates
-        if self.nblayer > 0:
-            slc = slice(self.nblayer, -self.nblayer)
-        else:
-            slc = slice(None)
-        X = self.coords[0][slc]
-        Y = self.coords[1][slc]
-        if self.ndims == 2:
-            Z = [0]
-        else:
-            Z = self.coords[2][slc]
-
-        r = tvtk.RectilinearGrid()
-        # r.point_data.scalars = data.ravel()
-        # r.point_data.scalars.name = 'scalars'
-        r.dimensions = (len(X), len(Y), len(Z))
-        r.x_coordinates = X
-        r.y_coordinates = Y
-        if self.ndims > 2:
-            r.z_coordinates = Z
-        return r
-
     def image_grid(self):
         # Coordinates
         if self.nblayer > 0:
@@ -247,11 +223,9 @@ class UniformGrid:
             Z = self.coords[2][slc]
 
         if self.ndims == 2:
-            r = tvtk.ImageData(spacing=[*self.ds, 1], origin=tuple([self.rect[i][0] for i in range(2)] + [0]))
+            return [*self.ds, 1], tuple([self.rect[i][0] for i in range(2)] + [0])
         else:
-            r = tvtk.ImageData(spacing=self.ds[:3], origin=tuple([self.rect[i][0] for i in range(3)]))
-        r.dimensions = (len(X), len(Y), len(Z))
-        return r
+            return self.ds[:3], tuple([self.rect[i][0] for i in range(3)])
 
 
 def load_input(input_meta='ns.json'):
