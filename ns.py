@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import itertools
 from utils import tecplot_WriteRectilinearMesh
+from tvtk.api import tvtk, write_data
 
 cupyReady = False
 try:
@@ -214,6 +215,7 @@ class IncompressibleSolver:
             u[0] = np.cos(np.pi * x) * np.sin(np.pi * y)
             u[1] = -np.sin(np.pi * x) * np.cos(np.pi * y)
             u[:] += 1e-4 * (np.random.rand(*u.shape) - 0.5)
+            # u[:] = (np.random.rand(*u.shape) - 0.5)
 
             self.to_fourier_vars(u, uh)
             uh *= self.filter
@@ -288,8 +290,6 @@ class IncompressibleSolver:
         self.dt = self.cfl * s
 
     def update(self):
-        if self.dt == 0:
-            return
         np = self.cupy_module
         self.refresh_buffer()
         for ii in self.grid.domain:
@@ -304,12 +304,12 @@ class IncompressibleSolver:
             A = np.zeros_like(uh)
 
             # Step n -> n+{1/2}
-
             self.advection(A, u, uh, k)
             A *= self.filter
             self.projection(A, k, ksq)
             uh_star = (uh - 0.5 * self.dt * A) / (1.0 + 0.5 * self.dt * self.eos.nu() * ksq)
             self.to_physical_vars(u, uh_star)
+            del uh_star
 
             # Step n -> n+1
             # self.advection(A, u, uh_star, k)
@@ -335,25 +335,17 @@ class IncompressibleSolver:
             a = np.array([a] * self.grid.ndims)
             a[p] *= 2
             a = a.reshape((self.grid.ndims, *([1] * self.grid.ndims)))
-
-            frw = 0.5 * u[p:(p + 1)] * u + a * u
-            flw = np.roll(0.5 * u[p:(p + 1)] * u - a * u, -1, axis=1 + p)
-
             _, qc, _, _, _, _, _, qp, qm, qpp, qmm = stencil_op[p]
 
             ## Right Flux
+            fw = 0.5 * (u[p:(p + 1)] * u + a * u)
             # Choose the positive fluxes, 'v', to compute the left cell boundary flux:
             # $u_{i+1/2}^{-}$
-            fr = frw[qc]
-            frmm = frw[qmm]
-            frm = frw[qm]
-            frp = frw[qp]
-            frpp = frw[qpp]
-
-            # Polynomials
-            p0 = (2 * frmm - 7 * frm + 11 * fr) / 6
-            p1 = (-frm + 5 * fr + 2 * frp) / 6
-            p2 = (2 * fr + 5 * frp - frpp) / 6
+            fr = fw[qc]
+            frmm = fw[qmm]
+            frm = fw[qm]
+            frp = fw[qp]
+            frpp = fw[qpp]
 
             # Smooth Indicators (Beta factors)
             w0 = 13 / 12 * (frmm - 2 * frm + fr) ** 2 + 1 / 4 * (frmm - 4 * frm + 3 * fr) ** 2
@@ -373,26 +365,27 @@ class IncompressibleSolver:
             alphasum = w0 + w1 + w2
 
             # ENO stencils weights
-            w0 = w0 / alphasum
-            w1 = w1 / alphasum
-            w2 = w2 / alphasum
-
-            # Numerical Flux at cell boundary, $u_{i+1/2}^{-}$;
-            hn = w0 * p0 + w1 * p1 + w2 * p2
-
-            ## Left Flux
-            # Choose the negative fluxes, 'u', to compute the left cell boundary flux:
-            # $u_{i-1/2}^{+}$
-            fl = flw[qc]
-            flmm = flw[qmm]
-            flm = flw[qm]
-            flp = flw[qp]
-            flpp = flw[qpp]
+            w0 /= alphasum
+            w1 /= alphasum
+            w2 /= alphasum
 
             # Polynomials
-            p0 = (-flmm + 5 * flm + 2 * fl) / 6
-            p1 = (2 * flm + 5 * fl - flp) / 6
-            p2 = (11 * fl - 7 * flp + 2 * flpp) / 6
+            w0 *= (2 * frmm - 7 * frm + 11 * fr) / 6
+            w1 *= (-frm + 5 * fr + 2 * frp) / 6
+            w2 *= (2 * fr + 5 * frp - frpp) / 6
+
+            # Numerical Flux at cell boundary, $u_{i+1/2}^{-}$;
+            hn = w0 + w1 + w2
+
+            ## Left Flux
+            fw = np.roll(0.5 * (u[p:(p + 1)] * u - a * u), -1, axis=1 + p)
+            # Choose the negative fluxes, 'u', to compute the left cell boundary flux:
+            # $u_{i-1/2}^{+}$
+            fl = fw[qc]
+            flmm = fw[qmm]
+            flm = fw[qm]
+            flp = fw[qp]
+            flpp = fw[qpp]
 
             # Smooth Indicators (Beta factors)
             w0 = 13 / 12 * (flmm - 2 * flm + fl) ** 2 + 1 / 4 * (flmm - 4 * flm + 3 * fl) ** 2
@@ -412,12 +405,17 @@ class IncompressibleSolver:
             alphasum = w0 + w1 + w2
 
             # ENO stencils weights
-            w0 = w0 / alphasum
-            w1 = w1 / alphasum
-            w2 = w2 / alphasum
+            w0 /= alphasum
+            w1 /= alphasum
+            w2 /= alphasum
+
+            # Polynomials
+            w0 *= (-flmm + 5 * flm + 2 * fl) / 6
+            w1 *= (2 * flm + 5 * fl - flp) / 6
+            w2 *= (11 * fl - 7 * flp + 2 * flpp) / 6
 
             # Numerical Flux at cell boundary, $u_{i-1/2}^{+}$;
-            hp = w0 * p0 + w1 * p1 + w2 * p2
+            hp = w0 + w1 + w2
 
             A += (hp - np.roll(hp, 1, axis=1 + p) + hn - np.roll(hn, 1, axis=1 + p)) / self.grid.ds[p]
 
@@ -434,17 +432,79 @@ class IncompressibleSolver:
         if not self.b_dumpfile:
             return False
         self.refresh_buffer()
-        rn = "result.%06d.tec" % (self.nti,)
 
+        rn = "result.%06d.vtk" % (self.nti,)
         for ii in self.grid.domain:
             slc = (slice(None), *ii)
             if self.b_Cupy:
                 u = self.splitvars(self.U[slc].get())
             else:
                 u = self.splitvars(self.U[slc])
-            uvars = [("u_%d" % i, u[i].flatten(order='F')) for i in range(self.grid.ndims)]
-            vars = uvars
-            self.grid.dumpToTecplot(self.output_dir.joinpath(rn), vars)
+            r = self.grid.image_grid()
+            if self.grid.ndims == 2:
+                u = np.append(u, np.zeros_like(u[0:1]), axis=0)
+            r.point_data.vectors = np.array([u[i].flatten(order='F') for i in range(3)]).T
+            r.point_data.vectors.name = 'u'
+            write_data(r, str(self.output_dir.joinpath(rn)), file_type="binary")
+
+    def dump_solutionRECT(self, n):
+        if not self.b_dumpfile:
+            return False
+        self.refresh_buffer()
+
+        rn = "result.%06d.vtk" % (self.nti,)
+        for ii in self.grid.domain:
+            slc = (slice(None), *ii)
+            if self.b_Cupy:
+                u = self.splitvars(self.U[slc].get())
+            else:
+                u = self.splitvars(self.U[slc])
+            r = self.grid.rectilinear_grid()
+            #r.debug = True
+            ## Data 0 # scalar data
+            #r.point_data.scalars = u[0].flatten(order='F')
+            #r.point_data.scalars.name = 'u'
+            ## Data 1 # additional scalar data
+            #r.point_data.add_array(u[1].flatten(order='F'))
+            #r.point_data.get_array(1).name = 'v'
+            ## Data 2 # Vector data
+            if self.grid.ndims == 2:
+                u = np.append(u, np.zeros_like(u[0:1]), axis=0)
+            r.point_data.vectors = np.array([u[i].flatten(order='F') for i in range(3)]).T
+            r.point_data.vectors.name = 'u'
+            write_data(r, str(self.output_dir.joinpath(rn)), file_type="binary")
+
+    def dump_solutionTEC(self, n):
+        if not self.b_dumpfile:
+            return False
+        self.refresh_buffer()
+
+        for ii in self.grid.domain:
+            if self.grid.ndims <= 3:
+                rn = "result.%06d.tec" % (self.nti,)
+                slc = (slice(None), *ii)
+                if self.b_Cupy:
+                    u = self.splitvars(self.U[slc].get())
+                else:
+                    u = self.splitvars(self.U[slc])
+                uvars = [("u%d" % i, u[i].flatten(order='F')) for i in range(self.grid.ndims)]
+                vars = uvars
+                self.grid.dumpToTecplot(self.output_dir.joinpath(rn), vars)
+            else:
+                # Get a 3D slice
+                slcs = [[], []]
+                slcs[0] = self.grid.get3dslice(ii, axes=(0, 1, 2))
+                slcs[1] = self.grid.get3dslice(ii, axes=(0, 1, 3))
+
+                for slc, ilc in zip(slcs, range(len(slcs))):
+                    rn = "result%d.%06d.tec" % (ilc, self.nti,)
+                    if self.b_Cupy:
+                        u = self.splitvars(self.U[slc].get())
+                    else:
+                        u = self.splitvars(self.U[slc])
+                    uvars = [("u%d" % (i,), u[i].flatten(order='F')) for i in range(self.grid.ndims)]
+                    vars = uvars
+                    self.grid.dumpToTecplot(self.output_dir.joinpath(rn), vars)
         return True
 
     def dump_meta(self):

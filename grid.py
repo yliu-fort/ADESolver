@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import itertools
 from utils import tecplot_WriteRectilinearMesh
+from tvtk.api import tvtk
 
 try:
     import cupy as cp
@@ -140,7 +141,7 @@ class UniformGrid:
         dqp[k + 1], dqm[k + 1] = slice(1, None), slice(-1)  # n + 1
 
         return tuple(qe), tuple(qc), tuple(qce), tuple(qpe), tuple(qme), tuple(dqp), tuple(dqm), \
-            tuple(qp), tuple(qm), tuple(qpp), tuple(qmm)
+               tuple(qp), tuple(qm), tuple(qpp), tuple(qmm)
 
     def create_stencil_op_collection(self):
         self.stencil_op_collection = [[[] for _ in range(self.ndims)] for _ in range(np.product(self.n_decomposition))]
@@ -195,6 +196,62 @@ class UniformGrid:
             tecplot_WriteRectilinearMesh(filename, X, Y, [], vars)  # 2D
         else:
             tecplot_WriteRectilinearMesh(filename, X, Y, Z, vars)  # 3D
+
+    def get3dslice(self, ii, axes=(0, 1, 2)):
+        # Get a 3D slice
+        assert self.ndims > 2, "must be 3 dimensional or higher!"
+        assert len(axes) == 3, "must assume 3 axes!"
+
+        ii0 = ii.copy()
+        for p in range(self.ndims):
+            if p in axes:
+                continue
+            ii0[p] = slice(self.size[p] // 2, self.size[p] // 2 + 1)
+
+        return (slice(None), *ii0)
+
+    def rectilinear_grid(self):
+        # Coordinates
+        if self.nblayer > 0:
+            slc = slice(self.nblayer, -self.nblayer)
+        else:
+            slc = slice(None)
+        X = self.coords[0][slc]
+        Y = self.coords[1][slc]
+        if self.ndims == 2:
+            Z = [0]
+        else:
+            Z = self.coords[2][slc]
+
+        r = tvtk.RectilinearGrid()
+        # r.point_data.scalars = data.ravel()
+        # r.point_data.scalars.name = 'scalars'
+        r.dimensions = (len(X), len(Y), len(Z))
+        r.x_coordinates = X
+        r.y_coordinates = Y
+        if self.ndims > 2:
+            r.z_coordinates = Z
+        return r
+
+    def image_grid(self):
+        # Coordinates
+        if self.nblayer > 0:
+            slc = slice(self.nblayer, -self.nblayer)
+        else:
+            slc = slice(None)
+        X = self.coords[0][slc]
+        Y = self.coords[1][slc]
+        if self.ndims == 2:
+            Z = [0]
+        else:
+            Z = self.coords[2][slc]
+
+        if self.ndims == 2:
+            r = tvtk.ImageData(spacing=[*self.ds, 1], origin=tuple([self.rect[i][0] for i in range(2)] + [0]))
+        else:
+            r = tvtk.ImageData(spacing=self.ds[:3], origin=tuple([self.rect[i][0] for i in range(3)]))
+        r.dimensions = (len(X), len(Y), len(Z))
+        return r
 
 
 def load_input(input_meta='ns.json'):
