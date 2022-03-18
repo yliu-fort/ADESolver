@@ -213,6 +213,7 @@ class IncompressibleSolver:
             x, y = np.asarray(self.grid.mesh[slc][0]), np.asarray(self.grid.mesh[slc][1])
             u[0] = np.cos(np.pi * x) * np.sin(np.pi * y)
             u[1] = -np.sin(np.pi * x) * np.cos(np.pi * y)
+            u[:] += 1e-4*(np.random.rand(*x.shape) - 0.5)
 
             self.to_fourier_vars(u, uh)
             uh *= self.filter
